@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Generate PDF & QR</title>
+    
+    <!-- Load pdf-lib for editing PDFs -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- Load qrcode for generating the barcode -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f7f6; padding: 20px; }
+        .container { max-width: 500px; background: white; padding: 30px; border-radius: 8px; margin: auto; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; color: #666; font-size: 14px;}
+        .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #218838; }
+        #status-message { text-align: center; margin-top: 15px; font-weight: bold; color: #0056b3; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Enter Vehicle Details</h2>
+    <form id="data-form">
+        <div class="input-group">
+            <label for="vehicle">Vehicle Number</label>
+            <input type="text" id="vehicle" required placeholder="e.g., WB-74-A-1234">
+        </div>
+        <div class="input-group">
+            <label for="date">Date</label>
+            <input type="date" id="date" required>
+        </div>
+        <div class="input-group">
+            <label for="time">Time</label>
+            <input type="time" id="time" required>
+        </div>
+        <button type="submit" id="submit-btn">Generate & Download PDF</button>
+        <div id="status-message"></div>
+    </form>
+</div>
+
+<script type="module">
+    // Import Firestore Database functions
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // Your specific Firebase configuration
+    const firebaseConfig = {
+        apiKey: "AIzaSyBsmsXyXdH9PkzJwVSNMG3MY_56dB47JMY",
+        authDomain: "mdtc-dd4ed.firebaseapp.com",
+        projectId: "mdtc-dd4ed",
+        storageBucket: "mdtc-dd4ed.firebasestorage.app",
+        messagingSenderId: "44470576587",
+        appId: "1:44470576587:web:eb6d7708c63067235fc24e"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app); // Connect to the database
+
+    const form = document.getElementById('data-form');
+    const statusText = document.getElementById('status-message');
+    const submitBtn = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault(); // Stop page refresh
+        
+        submitBtn.innerText = "Processing...";
+        submitBtn.disabled = true;
+        statusText.innerText = "Saving to database...";
+
+        const vehicle = document.getElementById('vehicle').value;
+        const date = document.getElementById('date').value;
+        const time = document.getElementById('time').value;
+
+        // Create a unique ID for this specific receipt (e.g., REC-1701234567890)
+        const uniqueId = "REC-" + Date.now();
+
+        try {
+            // A. Save Data to Firebase inside a folder (collection) named "receipts"
+            await setDoc(doc(db, "receipts", uniqueId), {
+                vehicle: vehicle,
+                date: date,
+                time: time,
+                timestamp: new Date()
+            });
+
+            statusText.innerText = "Generating QR Code...";
+
+            // B. Generate QR Code
+            // IMPORTANT: CHANGE 'your-app.vercel.app' TO YOUR ACTUAL VERCEL DOMAIN LATER
+            const verifyUrl = `https://your-app.vercel.app/eReceipt.html?id=${uniqueId}`;
+            const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, { width: 120 });
+
+            statusText.innerText = "Creating PDF...";
+
+            // C. Load Blank PDF Template
+            const existingPdfBytes = await fetch('template.pdf').then(res => res.arrayBuffer());
+            const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+            const firstPage = pdfDoc.getPages()[0];
+
+            // D. Write Text onto the PDF
+            // Note: In PDF format, coordinates (X:0, Y:0) start at the BOTTOM-LEFT corner of the page.
+            firstPage.drawText(`Vehicle: ${vehicle}`, { x: 50, y: 700, size: 14 });
+            firstPage.drawText(`Date: ${date}`, { x: 50, y: 680, size: 14 });
+            firstPage.drawText(`Time: ${time}`, { x: 50, y: 660, size: 14 });
+
+            // E. Stamp QR Code onto the PDF
+            const qrImage = await pdfDoc.embedPng(qrCodeDataUrl);
+            firstPage.drawImage(qrImage, { x: 400, y: 600, width: 100, height: 100 });
+
+            // F. Download Final PDF
+            const pdfBytes = await pdfDoc.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${vehicle}_GatePass.pdf`;
+            link.click();
+
+            statusText.innerText = "Success! PDF Downloaded.";
+            statusText.style.color = "green";
+            form.reset();
+
+        } catch (error) {
+            console.error(error);
+            statusText.innerText = "Error: Check the console (F12).";
+            statusText.style.color = "red";
+        } finally {
+            submitBtn.innerText = "Generate & Download PDF";
+            submitBtn.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>
